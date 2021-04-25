@@ -50,9 +50,10 @@ class PositionUpdate {
         }
     }
 
-    <T extends FxInstrument<P>, P extends PositionInstrument> List<Trade<T, P>> get(Type<T> type) {
-        List<?> ret = trades[type.enumType().ordinal()];
+    <T extends FxInstrument<P>, P extends PositionInstrument> List<Trade<T, P>> get(MarkerType<T> type) {
+        List<?> ret = trades[type.type().ordinal()];
         for (Object t : ret) {
+            // TODO assert this during construction
             assert type.clazz().isInstance(t);
         }
         return (List<Trade<T,P>>) ret;
@@ -60,9 +61,9 @@ class PositionUpdate {
 
     @SuppressWarnings("unchecked")
     private static List<Object>[] make_array() {
-        FxInstType[] types = FxInstType.values();
+        FxInstrumentType[] types = FxInstrumentType.values();
         List<?>[] ret = new List<?>[types.length];
-        for (FxInstType type : types) {
+        for (FxInstrumentType type : types) {
             ret[type.ordinal()] = new ArrayList<>();
         }
         return (List<Object>[]) ret;
@@ -105,73 +106,68 @@ class Position<T extends PositionInstrument> {
 }
 
 
-interface Typed<T extends Typed<T>> {
-    TypedEnum<T> type();
-}
 
-interface TypedEnum<T extends Typed<T>> {
-    int ordinal();
-    String name();
+class MarkerType<T> {
+    final Class<T> clazz;
+    final EnumType<?, ? super T> type;
 
-    Type<? extends T> type();
-}
-
-class Type<T> {
-    private final Class<T> clazz;
-    private final TypedEnum<? super T> enumType;
-
-    protected Type(Class<T> clazz, TypedEnum<? super T> enumType) {
+    MarkerType(Class<T> clazz, EnumType<?, ? super T> type) {
         this.clazz = clazz;
-        this.enumType = enumType;
+        this.type = type;
     }
 
     public Class<T> clazz() {
         return clazz;
     }
 
-    public TypedEnum<? super T> enumType() {
-        return enumType;
-    }
-}
-
-enum FxInstType implements TypedEnum<FxInstrument<?>> {
-    SPOT(FxInstrument.SPOT),
-    FORWARD(FxInstrument.FORWARD),
-    FUTURE(FxInstrument.FUTURE)
-    ;
-
-    private final Type<? extends FxInstrument<?>> type;
-
-    FxInstType(Type<? extends FxInstrument<?>> type) {
-        this.type = type;
-    }
-
-    public Type<? extends FxInstrument<?>> type() {
+    public EnumType<?, ? super T> type() {
         return type;
     }
 }
 
-enum PosInstType implements TypedEnum<PositionInstrument> {
-    CASH(PositionInstrument.CASH_FLOW),
-    FUTURES(PositionInstrument.CONTRACT)
+interface EnumType<T extends Enum<T>, P> {
+    int ordinal();
+    MarkerType<? extends P> marker();
+}
+
+
+enum FxInstrumentType implements EnumType<FxInstrumentType, FxInstrument<?>> {
+    SPOT(FxInstrument.SPOT),
+    FORWARD(FxInstrument.FORWARD),
+    FUTURE(FxInstrument.FUTURE);
+
+    private final MarkerType<? extends FxInstrument<?>> marker;
+
+    FxInstrumentType(MarkerType<? extends FxInstrument<?>> marker) {
+        this.marker = marker;
+    }
+
+    public MarkerType<? extends FxInstrument<?>> marker() {
+        return marker;
+    }
+}
+
+enum PositionInstrumentType implements EnumType<PositionInstrumentType, PositionInstrument> {
+    ForwardCashFlow(PositionInstrument.CASH_FLOW),
+    Contract(PositionInstrument.CONTRACT)
     ;
 
-    private final Type<? extends PositionInstrument> type;
+    private final MarkerType<? extends PositionInstrument> marker;
 
-    PosInstType(Type<? extends PositionInstrument> type) {
-        this.type = type;
+    PositionInstrumentType(MarkerType<? extends PositionInstrument> marker) {
+        this.marker = marker;
     }
 
     @Override
-    public Type<? extends PositionInstrument> type() {
-        return type;
+    public MarkerType<? extends PositionInstrument> marker() {
+        return marker;
     }
 }
 
-abstract class FxInstrument<P extends PositionInstrument> implements Typed<FxInstrument<?>> {
-    public static Type<FxInstrument.FxSpot> SPOT = new Type<>(FxInstrument.FxSpot.class, FxInstType.SPOT);
-    public static Type<FxInstrument.FxForward> FORWARD = new Type<>(FxInstrument.FxForward.class, FxInstType.FORWARD);
-    public static Type<FxInstrument.Future> FUTURE = new Type<>(FxInstrument.Future.class, FxInstType.FUTURE);
+abstract class FxInstrument<P extends PositionInstrument> {
+    public static MarkerType<FxSpot> SPOT = new MarkerType<>(FxInstrument.FxSpot.class, FxInstrumentType.SPOT);
+    public static MarkerType<FxForward> FORWARD = new MarkerType<>(FxInstrument.FxForward.class, FxInstrumentType.FORWARD);
+    public static MarkerType<Future> FUTURE = new MarkerType<>(FxInstrument.Future.class, FxInstrumentType.FUTURE);
 
     private final String pair;
 
@@ -183,11 +179,11 @@ abstract class FxInstrument<P extends PositionInstrument> implements Typed<FxIns
         return pair;
     }
 
-    @Override public String toString() {
-        return String.format("[%s, %s]", type().name(), pair);
-    }
+    public abstract FxInstrumentType type();
 
-    public abstract Type<P> positionType();
+    @Override public String toString() {
+        return String.format("[%s, %s]", type(), pair);
+    }
 
     public static class FxSpot extends FxInstrument<PositionInstrument.CashFlow> {
         public FxSpot(String pair) {
@@ -195,13 +191,8 @@ abstract class FxInstrument<P extends PositionInstrument> implements Typed<FxIns
         }
 
         @Override
-        public TypedEnum<FxInstrument<?>> type() {
-            return FxInstType.SPOT;
-        }
-
-        @Override
-        public Type<PositionInstrument.CashFlow> positionType() {
-            return PositionInstrument.CASH_FLOW;
+        public FxInstrumentType type() {
+            return FxInstrumentType.SPOT;
         }
     }
 
@@ -211,13 +202,8 @@ abstract class FxInstrument<P extends PositionInstrument> implements Typed<FxIns
         }
 
         @Override
-        public TypedEnum<FxInstrument<?>> type() {
-            return FxInstType.FORWARD;
-        }
-
-        @Override
-        public Type<PositionInstrument.CashFlow> positionType() {
-            return PositionInstrument.CASH_FLOW;
+        public FxInstrumentType type() {
+            return FxInstrumentType.FORWARD;
         }
     }
 
@@ -230,28 +216,24 @@ abstract class FxInstrument<P extends PositionInstrument> implements Typed<FxIns
         }
 
         @Override
-        public TypedEnum<FxInstrument<?>> type() {
-            return FxInstType.FUTURE;
-        }
-
-        @Override
-        public Type<PositionInstrument.Contract> positionType() {
-            return PositionInstrument.CONTRACT;
+        public FxInstrumentType type() {
+            return FxInstrumentType.FUTURE;
         }
 
         @Override public String toString() {
-            return String.format("[%s, %s, %s]", type().name(), pair(), contract);
+            return String.format("[%s, %s, %s]", type(), pair(), contract);
         }
     }
 }
 
-abstract class PositionInstrument implements Typed<PositionInstrument> {
-    public static final Type<CashFlow> CASH_FLOW = new Type<>(CashFlow.class, PosInstType.CASH);
-    public static final Type<Contract> CONTRACT = new Type<>(Contract.class, PosInstType.FUTURES);
+abstract class PositionInstrument {
+    public static final MarkerType<CashFlow> CASH_FLOW = new MarkerType<>(CashFlow.class, PositionInstrumentType.ForwardCashFlow);
+    public static final MarkerType<Contract> CONTRACT = new MarkerType<>(Contract.class, PositionInstrumentType.Contract);
 
     private final String currency;
     private PositionInstrument(String currency) { this.currency = currency; }
     public String currency() { return currency; }
+    public abstract PositionInstrumentType type();
 
     @Override public String toString() {
         return String.format("[%s, %s]", getClass().getSimpleName(), currency);
@@ -265,8 +247,8 @@ abstract class PositionInstrument implements Typed<PositionInstrument> {
         }
 
         @Override
-        public TypedEnum<PositionInstrument> type() {
-            return PosInstType.CASH;
+        public PositionInstrumentType type() {
+            return PositionInstrumentType.ForwardCashFlow;
         }
     }
 
@@ -278,8 +260,8 @@ abstract class PositionInstrument implements Typed<PositionInstrument> {
         }
 
         @Override
-        public TypedEnum<PositionInstrument> type() {
-            return PosInstType.FUTURES;
+        public PositionInstrumentType type() {
+            return PositionInstrumentType.Contract;
         }
     }
 }
